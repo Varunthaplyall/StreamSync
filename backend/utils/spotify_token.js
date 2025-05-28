@@ -4,6 +4,8 @@ import axios from "axios";
 import querystring from "querystring";
 import crypto from "crypto";
 import dotenv from "dotenv"
+import user from "../models/users.js"
+import { create } from "domain";
 
 dotenv.config()
 
@@ -73,13 +75,60 @@ router.get("/callback", async (req, res) => {
 
     const { access_token, refresh_token, expires_in } = tokenResponse.data;
 
-    // You can now use `access_token` to access /v1/me or /v1/me/tracks
-    // Ideally: store token in session or DB
-    res.json({ access_token, refresh_token, expires_in });
+    const userResponse = await axios.get("https://api.spotify.com/v1/me", {
+      headers: {
+        "Authorization": `Bearer ${access_token}`,
+      },
+    });
+
+    const spotifyProfile = {
+        username: userResponse.data.display_name,
+        email: userResponse.data.email,
+        countryCode: userResponse.data.country,
+        uri: userResponse.data.uri,
+        Id: userResponse.data.id,
+        Token: {
+            access_token,
+            refresh_token,
+            expires_in,
+            scope: tokenResponse.data.scope,
+            token_type: tokenResponse.data.token_type,
+        }
+    };
+    await user.findOneAndUpdate({Id: spotifyProfile.Id}, {$set: spotifyProfile}, {upsert: true, new: true})
+    console.log("User saved to DB")
   } catch (error) {
-    console.error("Token exchange failed:", error.response?.data || error.message);
+    console.error("Token exchange failed:", error.response?.data || error);
     res.status(500).json({ error: "Failed to get access token" });
   }
+});
+
+router.get('/refresh_token', function(req, res) {
+
+  var refresh_token = req.query.refresh_token;
+  var authOptions = {
+    url: 'https://accounts.spotify.com/api/token',
+    headers: {
+      'content-type': 'application/x-www-form-urlencoded',
+      'Authorization': 'Basic ' + (new Buffer.from(client_id + ':' + client_secret).toString('base64'))
+    },
+    form: {
+      grant_type: 'refresh_token',
+      refresh_token: refresh_token
+    },
+    json: true
+  };
+
+  request.post(authOptions, function(error, response, body) {
+    if (!error && response.statusCode === 200) {
+      var access_token = body.access_token,
+          refresh_token = body.refresh_token || refresh_token;
+      res.send({
+        'access_token': access_token,
+        'refresh_token': refresh_token
+      });
+    }
+  });
 });
 
 export default router;
