@@ -4,14 +4,15 @@ import axios from "axios";
 import querystring from "querystring";
 import crypto from "crypto";
 import dotenv from "dotenv"
-import user from "../models/users.js"
-import { create } from "domain";
+import User from '../models/users.js';
+import jwt from "jsonwebtoken";
 
 dotenv.config()
 
 const SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID;
 const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET;
-const REDIRECT_URI = "http://localhost:3000/callback";
+const URL = process.env.URL
+const REDIRECT_URI = `${URL}/callback`;
 
 // Helper to generate random state string
 function generateRandomString(length) {
@@ -74,7 +75,7 @@ router.get("/callback", async (req, res) => {
     );
 
     const { access_token, refresh_token, expires_in } = tokenResponse.data;
-
+    
     const userResponse = await axios.get("https://api.spotify.com/v1/me", {
       headers: {
         "Authorization": `Bearer ${access_token}`,
@@ -95,40 +96,45 @@ router.get("/callback", async (req, res) => {
             token_type: tokenResponse.data.token_type,
         }
     };
-    await user.findOneAndUpdate({Id: spotifyProfile.Id}, {$set: spotifyProfile}, {upsert: true, new: true})
-    console.log("User saved to DB")
+    // Save or update user in the database
+    await User.findOneAndUpdate(
+      { Id: spotifyProfile.Id },
+      { $set: spotifyProfile },
+      { upsert: true, new: true }
+    );
+
+    res.json({ Id: spotifyProfile.Id});
+    console.log("A user saved to DB");   
+
   } catch (error) {
-    console.error("Token exchange failed:", error.response?.data || error);
+    if (axios.isAxiosError(error)) {
+        console.error("Token exchange failed:", {
+        status: error.response?.status,
+        data: error.response?.data,
+        config: error.config,
+    });
+    } else {
+    console.error("Unknown error during token exchange:", error);
+    }
     res.status(500).json({ error: "Failed to get access token" });
   }
 });
 
-router.get('/refresh_token', function(req, res) {
+export const refreshSpotifyToken = async (refreshToken) => {
+    console.log("refreshToken");
+  const params = new URLSearchParams();
+  params.append('grant_type', 'refresh_token');
+  params.append('refresh_token', refreshToken);
 
-  var refresh_token = req.query.refresh_token;
-  var authOptions = {
-    url: 'https://accounts.spotify.com/api/token',
+  const response = await axios.post('https://accounts.spotify.com/api/token', params, {
     headers: {
-      'content-type': 'application/x-www-form-urlencoded',
-      'Authorization': 'Basic ' + (new Buffer.from(client_id + ':' + client_secret).toString('base64'))
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Authorization': 'Basic ' + Buffer.from(`${SPOTIFY_CLIENT_ID}:${SPOTIFY_CLIENT_SECRET}`).toString('base64'),
     },
-    form: {
-      grant_type: 'refresh_token',
-      refresh_token: refresh_token
-    },
-    json: true
-  };
-
-  request.post(authOptions, function(error, response, body) {
-    if (!error && response.statusCode === 200) {
-      var access_token = body.access_token,
-          refresh_token = body.refresh_token || refresh_token;
-      res.send({
-        'access_token': access_token,
-        'refresh_token': refresh_token
-      });
-    }
   });
-});
+
+  return response.data; // Contains new access_token (and maybe refresh_token)
+};
+
 
 export default router;

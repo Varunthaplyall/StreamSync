@@ -1,22 +1,63 @@
-import axios from "axios";
+import axios from 'axios';
+import User from '../models/users';
+import {refreshSpotifyToken} from '../utils/spotify_token.js';
 
-export default {
-    getSongs: async (req, res) => {
-        try {
-            const req = await axios.get('https://api.spotify.com/v1/me/tracks', {
-                headers: {
-                    'Authorization':`Bearer BQB2t-RPzi_XzYs5ViFmhW18xGkmwMKhKY3P-2iPHjpt7JFER6EPcDO2avlOC5XFEjRgYMk8IaSvsEWSpZlPnn7Ck1zs34ShyL2QPiA1LM5B3ldd5CtsWP3XldNTkpgSdhyAKfTXg5_3fWQ9iTO2o-31BnNmUQv0WcDvmUnf8OCMpwiT098HNVdLFSe089TdtI3O5d-Rl4OFVdBUkw87tplC4DFiphhyfpubg-DnU2U3F84d_Ry8Vw05OWftc5njg6bL34Z4`
-                },
-                params:{
-                    limit: 50,
-                    offset: 0
-                }
-            })
+const getSongs = async (req, res) => {
+  const userId = req.headers["user-id"];
 
-            // console.log(req.data.items)
-            res.status(200).send("hello")
-        } catch (error) {
-            console.log(error)
-        }
+  if (!userId) {
+    return res.status(401).json({ error: 'Unauthorized request - missing x-user-id header' });
+  }
+
+  let user;
+  try {
+    user = await User.findById(userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+  } catch (err) {
+    return res.status(500).json({ error: 'DB error' });
+  }
+
+  const fetchSongs = async (accessToken) => {
+    return axios.get('https://api.spotify.com/v1/me/tracks', {
+      headers: { 'Authorization': `Bearer ${accessToken}` },
+      params: { limit: 50, offset: 0 }
+    });
+  };
+
+  let accessToken = user.spotifyAccessToken;
+
+  try {
+    const response = await fetchSongs(accessToken);
+    return res.json(response.data);
+  } catch (err) {
+    if (err.response && err.response.status === 401) {
+      // Access token expired - try refreshing
+      try {
+        console.log('Access token expired - trying to refresh');
+        const newTokens = await refreshSpotifyToken(user.spotifyRefreshToken);
+
+        // Save new token in DB
+        const updatedUser = await User.findOneAndUpdate(
+          { _id: userId },
+          { access_token: newTokens.access_token},
+          { new: true }
+        )
+        console.log('New access token:', newTokens);
+
+        // Retry with new token
+        const retryResponse = await fetchSongs(newTokens.access_token);
+        return res.json(retryResponse.data);
+      } catch (refreshErr) {
+        console.error('Refresh failed:', refreshErr.message);
+        return res.status(500).json({ error: 'Token refresh failed' });
+      }
+    } else {
+      console.error('Spotify API error:', err.message);
+      return res.status(500).json({ error: 'Spotify API error' });
     }
-}
+  }
+};
+
+
+
+export default { getSongs };
