@@ -5,7 +5,6 @@ import querystring from "querystring";
 import crypto from "crypto";
 import dotenv from "dotenv"
 import User from '../models/users.js';
-import jwt from "jsonwebtoken";
 
 dotenv.config()
 
@@ -121,7 +120,6 @@ router.get("/callback", async (req, res) => {
 });
 
 export const refreshSpotifyToken = async (refreshToken) => {
-    console.log("refreshToken");
   const params = new URLSearchParams();
   params.append('grant_type', 'refresh_token');
   params.append('refresh_token', refreshToken);
@@ -133,7 +131,7 @@ export const refreshSpotifyToken = async (refreshToken) => {
     },
   });
 
-  return response.data; // Contains new access_token (and maybe refresh_token)
+  return response.data;
 };
 
 
